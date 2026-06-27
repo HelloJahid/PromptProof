@@ -31,17 +31,27 @@ def test_parse_claims_rejects_non_json():
 
 
 def test_parse_verdicts_accepts_valid_objects():
-    good = json.dumps([{"claim": "c", "verdict": "Supported", "reason": "r"}])
+    good = json.dumps(
+        [{"claim": "c", "verdict": "Supported", "reason": "r", "source": "https://ex.com"}]
+    )
     out = parse_verdicts(good)
     assert isinstance(out[0], VerdictModel)
     assert out[0].verdict == "Supported"
+    assert out[0].source == "https://ex.com"
 
 
 def test_verdict_enum_gate_rejects_a_bad_label():
-    bad = json.dumps([{"claim": "c", "verdict": "Maybe", "reason": "r"}])
+    bad = json.dumps([{"claim": "c", "verdict": "Maybe", "reason": "r", "source": ""}])
     with pytest.raises(GateError) as ei:
         parse_verdicts(bad)
     assert "verdict" in str(ei.value).lower()
+
+
+def test_verdict_gate_requires_the_source_field():
+    missing_source = json.dumps([{"claim": "c", "verdict": "Supported", "reason": "r"}])
+    with pytest.raises(GateError) as ei:
+        parse_verdicts(missing_source)
+    assert "source" in str(ei.value).lower()
 
 
 # --- the retry/halt loop --------------------------------------------------------------

@@ -29,11 +29,13 @@ VerdictLabel = Literal["Supported", "Refuted", "Unverifiable"]
 
 class VerdictModel(BaseModel):
     """One judged claim. The `Literal` on `verdict` IS the gate: any other value
-    (e.g. "Maybe", "True") is rejected automatically by Pydantic."""
+    (e.g. "Maybe", "True") is rejected automatically by Pydantic. `source` is the
+    citation URL the evidence-grounded judge relied on (empty string for Unverifiable)."""
 
     claim: str
     verdict: VerdictLabel
     reason: str
+    source: str  # required key; may be "" when Unverifiable
 
     @field_validator("claim", "reason")
     @classmethod

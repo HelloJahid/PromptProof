@@ -1,4 +1,4 @@
-"""Phase 2/3b tests — the extract -> judge chain, now gated, offline."""
+"""Phase 4b tests — the full extract -> search -> judge chain, offline."""
 
 import json
 
@@ -8,7 +8,22 @@ from engine.llm import LLM, MockClient
 PARA = "The Eiffel Tower is in Paris. It is made of aluminium."
 
 
-def test_chain_runs_extract_then_judge_and_passes_claims_downstream():
+class FakeTransport:
+    """Returns one evidence result per query; records calls."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, query, *, max_results=3):
+        self.calls.append(query)
+        return {
+            "results": [
+                {"title": "src", "url": f"https://ex.com/{len(self.calls)}", "content": query}
+            ]
+        }
+
+
+def test_chain_runs_extract_search_judge_and_grounds_the_judge_in_evidence():
     extract_out = json.dumps(
         ["The Eiffel Tower is in Paris.", "The Eiffel Tower is made of aluminium."]
     )
@@ -17,40 +32,42 @@ def test_chain_runs_extract_then_judge_and_passes_claims_downstream():
             {
                 "claim": "The Eiffel Tower is in Paris.",
                 "verdict": "Supported",
-                "reason": "Landmark.",
+                "reason": "Evidence confirms Paris.",
+                "source": "https://ex.com/1",
             },
             {
                 "claim": "The Eiffel Tower is made of aluminium.",
                 "verdict": "Refuted",
-                "reason": "Iron.",
+                "reason": "Evidence says iron.",
+                "source": "https://ex.com/2",
             },
         ]
     )
     client = MockClient(responses=[extract_out, judge_out])
-    report = run_chain(PARA, LLM(client=client))
+    transport = FakeTransport()
+
+    report = run_chain(PARA, LLM(client=client), transport=transport)
 
     assert report.ok
-    # Step 1 output became step 2 input — the second call's prompt carries the claims.
-    assert "The Eiffel Tower is in Paris." in client.calls[1]["user"]
-    assert report.claims == [
-        "The Eiffel Tower is in Paris.",
-        "The Eiffel Tower is made of aluminium.",
-    ]
+    # The search tool was called once per claim...
+    assert len(transport.calls) == 2
+    # ...and the retrieved evidence (its url) reached the judge's prompt.
+    assert "https://ex.com/1" in client.calls[1]["user"]
     assert [v.verdict for v in report.verdicts] == ["Supported", "Refuted"]
-    assert [r.step for r in report.trace.records] == ["extract_claims", "judge_claims"]
+    assert report.verdicts[0].source == "https://ex.com/1"
+    # Trace shows the full ReAct shape: extract, a search per claim, then judge.
+    steps = [r.step for r in report.trace.records]
+    assert steps == ["extract_claims", "search_evidence", "search_evidence", "judge_claims"]
 
 
-def test_chain_halts_on_failed_extraction_without_running_the_judge():
-    # A broken extraction now halts cleanly: the judge is never called, and the
-    # report carries the structured GateFailure instead of a poisoned result.
+def test_chain_halts_on_failed_extraction_without_searching_or_judging():
     client = MockClient(responses=["not a json array"])
-    report = run_chain(PARA, LLM(client=client))
+    transport = FakeTransport()
+
+    report = run_chain(PARA, LLM(client=client), transport=transport)
 
     assert not report.ok
-    assert report.failure is not None
     assert report.failure.step == "extract_claims"
-    assert report.claims == []
-    assert report.verdicts == []
-    # Only extract steps ran — no judge step in the trace.
-    assert all(r.step == "extract_claims" for r in report.trace.records)
-    assert not any(r.step == "judge_claims" for r in report.trace.records)
+    assert report.claims == [] and report.verdicts == []
+    assert transport.calls == []  # search never ran
+    assert not any(r.step == "search_evidence" for r in report.trace.records)
