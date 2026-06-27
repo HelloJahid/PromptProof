@@ -29,5 +29,5 @@ Thumbs.db
 .idea/
 .vscode/
 
-docs/
+docs
 CLAUDE.md
