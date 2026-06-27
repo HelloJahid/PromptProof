@@ -1,14 +1,15 @@
 """The prompt chain — orchestrates the steps in dependency order.
 
-Phase 4b: the full ReAct shape. extract -> (search evidence per claim) -> judge.
+Phase 5b: the full engine, including the feedback loop.
 
-  1. extract atomic claims (gated; halts the run on failure)
-  2. for each claim, retrieve evidence via the gate-checked search tool
-  3. judge each claim against ITS evidence (gated, evidence-grounded, cited)
+  1. extract atomic claims            (gated; halts on failure)
+  2. search evidence per claim        (gate-checked tool call)
+  3. judge each claim vs its evidence (gated, evidence-grounded, cited)
+  4. evaluate the report; if it fails the criteria, re-judge with the issues as feedback,
+     looping until it passes or hits `max_iterations`
 
-A per-claim search failure does not crash the run — that claim just gets no evidence,
-which steers the judge to "Unverifiable". The judge's own gate failure still surfaces on
-the Report. Phase 5 adds the evaluator feedback loop on top of this.
+Only the cheap judge step re-runs in the loop (evidence is already retrieved), and the loop
+is bounded, so the engine always terminates.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from engine.errors import GateFailure
+from engine.feedback import Evaluation, evaluate_report, issues_as_feedback
 from engine.gates import VerdictModel
 from engine.llm import LLM
 from engine.steps.extract import extract_claims
@@ -33,6 +35,7 @@ class Report:
     evidence: list[ClaimEvidence] = field(default_factory=list)
     trace: RunTrace = field(default_factory=RunTrace)
     failure: Optional[GateFailure] = None
+    evaluation: Optional[Evaluation] = None
 
     @property
     def ok(self) -> bool:
@@ -47,6 +50,7 @@ def run_chain(
     trace: Optional[RunTrace] = None,
     model: Optional[str] = None,
     max_results: int = 3,
+    max_iterations: int = 2,
 ) -> Report:
     trace = trace if trace is not None else RunTrace()
 
@@ -57,7 +61,7 @@ def run_chain(
             paragraph=paragraph, claims=[], verdicts=[], trace=trace, failure=extracted.failure
         )
 
-    # Step 2 — retrieve evidence per claim (a tool failure leaves that claim evidence-less).
+    # Step 2 — retrieve evidence per claim.
     items: list[ClaimEvidence] = []
     for claim in extracted.claims:
         evidence, _tool_failure = search_evidence(
@@ -65,14 +69,37 @@ def run_chain(
         )
         items.append(ClaimEvidence(claim=claim, evidence=evidence or []))
 
-    # Step 3 — judge each claim against its evidence.
+    # Steps 3 + 4 — judge, then evaluate-and-revise until it passes or the cap is hit.
     judged = judge_claims(items, llm, trace=trace, model=model)
+    iteration = 1
+    while True:
+        report = Report(
+            paragraph=paragraph,
+            claims=extracted.claims,
+            verdicts=judged.verdicts,
+            evidence=items,
+            trace=trace,
+            failure=judged.failure,
+        )
+        if judged.failure is not None:
+            return report  # a judge gate failure halts the loop
 
-    return Report(
-        paragraph=paragraph,
-        claims=extracted.claims,
-        verdicts=judged.verdicts,
-        evidence=items,
-        trace=trace,
-        failure=judged.failure,
-    )
+        evaluation = evaluate_report(report)
+        report.evaluation = evaluation
+        trace.record(
+            step="evaluate_report",
+            attempt=iteration,
+            outcome="ok" if evaluation.passed else "revise",
+            retry_reason=None if evaluation.passed else "; ".join(evaluation.issues),
+        )
+        if evaluation.passed or iteration >= max_iterations:
+            return report
+
+        iteration += 1
+        judged = judge_claims(
+            items,
+            llm,
+            trace=trace,
+            model=model,
+            feedback=issues_as_feedback(evaluation.issues),
+        )

@@ -52,10 +52,13 @@ def judge_claims(
     *,
     trace: Optional[RunTrace] = None,
     model: Optional[str] = None,
+    feedback: Optional[str] = None,
     max_tokens: int = 1500,
     max_attempts: int = 3,
 ) -> JudgeResult:
     system, user = build_judge_prompt(_to_payload(items))
+    if feedback:  # report-level revision feedback from the evaluator (Phase 5b)
+        user = f"{user}\n\n{feedback}"
     verdicts, failure = generate_and_validate(
         llm=llm,
         system=system,
