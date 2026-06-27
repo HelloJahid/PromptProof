@@ -1,0 +1,7 @@
+# Direct dependencies, pinned for reproducibility (Phase 0).
+# Tavily (web search) is added in Phase 4.
+anthropic==0.112.0
+pydantic==2.13.4
+python-dotenv==1.2.2
+pytest==9.1.1
+ruff==0.15.20
