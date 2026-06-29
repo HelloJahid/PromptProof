@@ -31,3 +31,7 @@ Thumbs.db
 
 docs
 CLAUDE.md
+
+# Internal — not part of the published code
+plans/
+tests/
