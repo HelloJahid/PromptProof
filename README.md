@@ -78,6 +78,19 @@ streamlit run app/gui.py                 # opens http://localhost:8501
 
 Pick a model and run a check; verdicts come back with sources and an expandable run trace.
 
+## Testing
+
+The model client and the search transport are both injectable, so the full suite runs fully
+mocked, with no API key and no network.
+
+```bash
+pip install -e ".[dev]"   # pytest + ruff
+ruff check .
+pytest -q                 # fully mocked, runs in milliseconds
+```
+
+CI runs the same lint and test steps on every push (see [`.github/workflows/ci.yaml`](.github/workflows/ci.yaml)).
+
 ## Project structure
 
 ```
@@ -92,14 +105,18 @@ engine/            The prompting engine (the focus of the project)
   prompts/         one prompt template per step (role/task/format/examples/context + CoT)
   steps/           extract and judge step functions
 app/               minimal interfaces: cli.py (terminal) and gui.py (Streamlit)
+tests/             pytest suite, model + tool mocked, plus a golden-example mini-eval
 ```
 
 ## Background
 
-This project is the build that accompanies a two-part series on reliable prompting systems.
-Part one covers the ideas:
-[Clever Prompts Are Cheap Now. Reliable LLM Prompting Systems Are the Skill.](https://medium.com/towards-artificial-intelligence/clever-prompts-are-cheap-now-reliable-llm-prompting-systems-are-the-skill-4229e147ebaf)
-Part two is this repository.
+This repository is the build behind a two-part series on reliable prompting systems, published in
+[Towards AI](https://medium.com/towards-artificial-intelligence):
+
+- **Part one — the ideas:** [Clever Prompts Are Cheap Now. Reliable LLM Prompting Systems Are the Skill.](https://medium.com/towards-artificial-intelligence/clever-prompts-are-cheap-now-reliable-llm-prompting-systems-are-the-skill-4229e147ebaf)
+- **Part two — the build:** [Your LLM Lies Confidently. I Built an Engine That Doesn't.](https://medium.com/towards-artificial-intelligence/your-llm-lies-confidently-i-built-an-engine-that-doesnt-2154b4857d59)
+
+Published by Towards AI Inc.
 
 ## License
 

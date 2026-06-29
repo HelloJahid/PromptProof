@@ -36,7 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gui = ["streamlit>=1.58"]
-dev = ["ruff>=0.15"]
+dev = ["pytest>=9", "ruff>=0.15"]
 
 [project.urls]
 Homepage = "https://github.com/HelloJahid/PromptProof"
@@ -49,6 +49,11 @@ promptproof = "app.cli:main"
 [tool.setuptools]
 # Flat layout: ship the engine and its interface, not the tests or planning notes.
 packages = ["engine", "engine.prompts", "engine.steps", "app"]
+
+[tool.pytest.ini_options]
+# Run pytest from the repo root; make the project importable as `engine`, `app`.
+pythonpath = ["."]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
