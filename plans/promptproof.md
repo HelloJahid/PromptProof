@@ -147,7 +147,8 @@ execute one phase → repeat** teaching loop, with a named git branch per phase.
 | **6. Tests + mini-eval** | pytest with model **and** search tool mocked (zero live calls); plus a small **golden-example** set (fixed paragraphs → expected verdicts) doubling as a lightweight eval. | Reliability |
 | **7. Minimal interface** | A thin CLI (paste paragraph → report) with a `--trace` flag surfacing the `RunTrace`. | — |
 | **8. Light CI** | GitHub Actions: lint + test only. | Hygiene |
-| **9. Blog** | Medium-ready post in `docs/blog/`, mostly about the engine. | Documentation |
+| **9. Minimal GUI** | A thin **Streamlit** app (paste paragraph → cited verdict report) reusing `run_chain`; pure `report_to_markdown` for testability; GUI dep isolated in `requirements-gui.txt`. | — |
+| **10. Blog** | Medium-ready post in `docs/blog/`, mostly about the engine. | Documentation |
 
 ### Cross-cutting engineering decisions (added after plan review)
 

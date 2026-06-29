@@ -17,12 +17,16 @@ It demonstrates four production-style workflow mechanisms:
 
 ## Status
 
-Built phase by phase (see [`plans/promptproof.md`](plans/promptproof.md)).
+The engine and both interfaces are complete (see [`plans/promptproof.md`](plans/promptproof.md)).
+All four mechanisms are implemented and covered by offline tests (model + search mocked).
 
-- [x] **Phase 0 — Scaffolding**: repo layout, model abstraction (`engine/llm.py`),
-      structured errors (`engine/errors.py`), the `RunTrace` observability spine
-      (`engine/trace.py`), and offline smoke tests.
-- [ ] Phases 1–9: see the plan.
+- [x] Scaffolding + observability spine (`engine/llm.py`, `engine/errors.py`, `engine/trace.py`)
+- [x] Prompt chaining (`engine/chain.py`): extract → search → judge
+- [x] Pydantic gate checks with halt / retry / retry-with-feedback (`engine/gates.py`)
+- [x] Gate-checked ReAct web-search tool (`engine/tools.py`)
+- [x] Evaluator feedback loop (`engine/feedback.py`)
+- [x] Golden-example mini-eval, CLI (`app/cli.py`), Streamlit GUI (`app/gui.py`), CI
+- [ ] Blog write-up (`docs/blog/`)
 
 ## Quickstart (dev)
 
@@ -30,16 +34,33 @@ Built phase by phase (see [`plans/promptproof.md`](plans/promptproof.md)).
 python -m venv .venv
 # Windows:  .venv\Scripts\activate     |  macOS/Linux:  source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env        # then add your ANTHROPIC_API_KEY
+cp .env.example .env        # then add your ANTHROPIC_API_KEY (and TAVILY_API_KEY for live search)
 pytest                      # tests run fully mocked — no API key or network needed
+```
+
+## Run it
+
+Live runs read `ANTHROPIC_API_KEY` and `TAVILY_API_KEY` from `.env`.
+
+**CLI**
+
+```bash
+python -m app.cli "The Sydney Opera House was designed by a Danish architect and opened in 1973."
+# add --trace to see every step, retry, and evaluation
+```
+
+**GUI (Streamlit)**
+
+```bash
+pip install -r requirements-gui.txt
+streamlit run app/gui.py     # opens http://localhost:8501 in your browser
 ```
 
 ## Layout
 
 ```
-engine/   # THE STAR — the prompting engine (llm, errors, trace; chain/gates/tools/feedback to come)
-app/      # minimal interface (CLI) — added in Phase 7
+engine/   # THE STAR — the prompting engine (llm, errors, trace, chain, gates, tools, feedback)
+app/      # minimal interfaces: cli.py (terminal) and gui.py (Streamlit)
 tests/    # pytest, model + tool mocked so the full chain is verifiable in CI
-docs/     # reference doc + Medium blog draft
 plans/    # the build plan (single source of truth)
 ```
