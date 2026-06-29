@@ -18,8 +18,13 @@ import os
 from dataclasses import dataclass
 from typing import Optional, Protocol, runtime_checkable
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
+# Default to the fast tier — these steps emit small, structured JSON, so Haiku is plenty and
+# keeps live runs snappy. Override per call (CLI --model / GUI selector) for higher quality.
+DEFAULT_MODEL = "claude-haiku-4-5"
 JUDGE_MODEL = "claude-opus-4-8"
+
+# Fail fast instead of the SDK's 10-minute default, so a stalled call surfaces as an error.
+DEFAULT_TIMEOUT = 60.0
 
 
 @dataclass
@@ -42,7 +47,7 @@ class CompletionClient(Protocol):
 class AnthropicClient:
     """Real client. Imports the SDK lazily so tests never need the package or a key."""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, *, timeout: float = DEFAULT_TIMEOUT):
         import anthropic  # lazy: keeps `import engine.llm` cheap and offline-friendly
 
         key = api_key or os.getenv("ANTHROPIC_API_KEY")
@@ -50,7 +55,7 @@ class AnthropicClient:
             raise RuntimeError(
                 "ANTHROPIC_API_KEY is not set. Copy .env.example to .env and fill it in."
             )
-        self._client = anthropic.Anthropic(api_key=key)
+        self._client = anthropic.Anthropic(api_key=key, timeout=timeout)
 
     def complete(
         self, *, system: str, user: str, model: str, max_tokens: int

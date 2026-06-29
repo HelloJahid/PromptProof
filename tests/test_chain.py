@@ -46,7 +46,9 @@ def test_chain_runs_full_pipeline_and_grounds_the_judge_in_evidence():
     assert report.ok
     assert report.evaluation is not None and report.evaluation.passed
     assert len(transport.calls) == 2
-    assert "https://ex.com/1" in client.calls[1]["user"]  # evidence reached the judge
+    # Evidence reached the judge. Searches run concurrently, so don't assert a specific
+    # url number — just that retrieved evidence urls are present in the judge's prompt.
+    assert "https://ex.com/" in client.calls[1]["user"]
     assert [v.verdict for v in report.verdicts] == ["Supported", "Refuted"]
     steps = [r.step for r in report.trace.records]
     assert steps == [

@@ -11,7 +11,7 @@ renderer (`report_to_markdown`) and `analyse()` stay importable in tests without
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from dotenv import load_dotenv
 
@@ -59,14 +59,18 @@ def analyse(
     *,
     llm: Optional[LLM] = None,
     transport: Optional[Transport] = None,
+    model: Optional[str] = None,
     max_iterations: int = 2,
+    progress: Optional[Callable[[str], None]] = None,
 ) -> Report:
     """Run the engine on a paragraph. Defaults to live clients; tests inject mocks."""
     return run_chain(
         paragraph,
         llm if llm is not None else LLM(),
         transport=transport if transport is not None else tavily_transport,
+        model=model,
         max_iterations=max_iterations,
+        progress=progress,
     )
 
 
@@ -79,16 +83,43 @@ def main() -> None:
     st.title("PromptProof")
     st.caption("Paste a paragraph. Each claim is checked against live web evidence.")
 
+    with st.sidebar:
+        st.subheader("Settings")
+        model_label = st.selectbox(
+            "Model",
+            [
+                "claude-haiku-4-5  (fast)",
+                "claude-sonnet-4-6  (balanced)",
+                "claude-opus-4-8  (best)",
+            ],
+            index=0,
+        )
+        model_id = model_label.split()[0]
+        revise = st.checkbox("Revise if the report is incomplete (slower)", value=False)
+
     paragraph = st.text_area("Paragraph", height=160, placeholder=PLACEHOLDER)
 
     if st.button("Check claims", type="primary"):
         if not paragraph.strip():
             st.warning("Please paste a paragraph first.")
             return
-        with st.spinner("Extracting claims, searching for evidence, judging…"):
-            report = analyse(paragraph.strip())
+        try:
+            with st.status("Running the engine…", expanded=True) as status:
+                report = analyse(
+                    paragraph.strip(),
+                    model=model_id,
+                    max_iterations=2 if revise else 1,
+                    progress=lambda msg: st.write(msg),
+                )
+                status.update(
+                    label=f"Done in {report.trace.total_seconds:.1f}s", state="complete"
+                )
+        except Exception as exc:  # surface API/network/timeout errors instead of hanging
+            st.error(f"Run failed: {type(exc).__name__}: {exc}")
+            return
+
         st.markdown(report_to_markdown(report))
-        with st.expander("Run trace"):
+        with st.expander("Run trace (per-step timings)"):
             st.code(report.trace.render())
 
 

@@ -14,6 +14,7 @@ The mechanism is generic: pass a different `parse` callable to gate any step.
 from __future__ import annotations
 
 import json
+import time
 from typing import Callable, Literal, Optional, TypeVar
 
 from pydantic import BaseModel, TypeAdapter, ValidationError, field_validator
@@ -132,9 +133,11 @@ def generate_and_validate(
 
     for attempt in range(1, max_attempts + 1):
         full_user = user if not feedback else f"{user}\n\n{feedback}"
+        start = time.monotonic()
         resp = llm.complete(
             system=system, user=full_user, model=model, max_tokens=max_tokens
         )
+        elapsed = time.monotonic() - start
         last_text = resp.text
 
         try:
@@ -151,6 +154,7 @@ def generate_and_validate(
                     model=resp.model,
                     input_tokens=resp.input_tokens,
                     output_tokens=resp.output_tokens,
+                    seconds=elapsed,
                 )
             feedback = (
                 f"Your previous response failed validation: {e.reason}. "
@@ -166,6 +170,7 @@ def generate_and_validate(
                 model=resp.model,
                 input_tokens=resp.input_tokens,
                 output_tokens=resp.output_tokens,
+                seconds=elapsed,
             )
         return value, None
 

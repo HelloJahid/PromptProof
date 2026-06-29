@@ -13,6 +13,7 @@ offline with zero network calls and no API key.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -88,12 +89,13 @@ def search_evidence(
     last_reason = ""
 
     for attempt in range(1, max_attempts + 1):
+        start = time.monotonic()
         # --- Action: call the external tool (may raise on timeout / rate limit / network) ---
         try:
             raw = transport(query, max_results=max_results)
         except Exception as e:  # transport-level transient failure
             last_reason = f"transport error: {type(e).__name__}: {e}"
-            _record_failure(trace, attempt, max_attempts, last_reason)
+            _record_failure(trace, attempt, max_attempts, last_reason, time.monotonic() - start)
             continue
 
         # --- Gate check: validate the raw observation against the schema ---
@@ -101,7 +103,7 @@ def search_evidence(
             parsed = RawSearchResponse.model_validate(raw)
         except ValidationError as e:
             last_reason = _reason_from_validation(e)
-            _record_failure(trace, attempt, max_attempts, last_reason)
+            _record_failure(trace, attempt, max_attempts, last_reason, time.monotonic() - start)
             continue
 
         evidence = [
@@ -113,6 +115,7 @@ def search_evidence(
                 step="search_evidence",
                 attempt=attempt,
                 outcome="ok",
+                seconds=time.monotonic() - start,
                 note=f"{len(evidence)} result(s)",
             )
         return evidence, None
@@ -121,7 +124,7 @@ def search_evidence(
 
 
 def _record_failure(
-    trace: Optional[RunTrace], attempt: int, max_attempts: int, reason: str
+    trace: Optional[RunTrace], attempt: int, max_attempts: int, reason: str, seconds: float
 ) -> None:
     if trace is None:
         return
@@ -130,4 +133,5 @@ def _record_failure(
         attempt=attempt,
         outcome="retry" if attempt < max_attempts else "tool_failed",
         retry_reason=reason,
+        seconds=seconds,
     )

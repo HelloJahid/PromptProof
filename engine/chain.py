@@ -1,21 +1,21 @@
 """The prompt chain — orchestrates the steps in dependency order.
 
-Phase 5b: the full engine, including the feedback loop.
-
   1. extract atomic claims            (gated; halts on failure)
-  2. search evidence per claim        (gate-checked tool call)
+  2. search evidence per claim        (gate-checked tool call, run concurrently)
   3. judge each claim vs its evidence (gated, evidence-grounded, cited)
   4. evaluate the report; if it fails the criteria, re-judge with the issues as feedback,
      looping until it passes or hits `max_iterations`
 
-Only the cheap judge step re-runs in the loop (evidence is already retrieved), and the loop
-is bounded, so the engine always terminates.
+The per-claim searches are independent, so they run concurrently (their latency is the
+slowest single search, not the sum). An optional `progress` callback emits human-readable
+stage messages for a UI; the timed `RunTrace` records seconds per step for diagnosis.
 """
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 
 from engine.errors import GateFailure
 from engine.feedback import Evaluation, evaluate_report, issues_as_feedback
@@ -25,6 +25,8 @@ from engine.steps.extract import extract_claims
 from engine.steps.judge import ClaimEvidence, judge_claims
 from engine.tools import Transport, search_evidence, tavily_transport
 from engine.trace import RunTrace
+
+ProgressFn = Callable[[str], None]
 
 
 @dataclass
@@ -42,6 +44,36 @@ class Report:
         return self.failure is None
 
 
+def _emit(progress: Optional[ProgressFn], message: str) -> None:
+    if progress is not None:
+        progress(message)
+
+
+def _gather_evidence(
+    claims: list[str],
+    *,
+    transport: Transport,
+    trace: RunTrace,
+    max_results: int,
+) -> list[ClaimEvidence]:
+    """Search for every claim concurrently. Order of `items` follows `claims`."""
+    items = [ClaimEvidence(claim=c) for c in claims]
+    if not claims:
+        return items
+    with ThreadPoolExecutor(max_workers=min(len(claims), 5)) as pool:
+        futures = {
+            pool.submit(
+                search_evidence, claim, transport=transport, trace=trace, max_results=max_results
+            ): i
+            for i, claim in enumerate(claims)
+        }
+        for future in as_completed(futures):
+            i = futures[future]
+            evidence, _tool_failure = future.result()
+            items[i].evidence = evidence or []
+    return items
+
+
 def run_chain(
     paragraph: str,
     llm: LLM,
@@ -51,25 +83,26 @@ def run_chain(
     model: Optional[str] = None,
     max_results: int = 3,
     max_iterations: int = 2,
+    progress: Optional[ProgressFn] = None,
 ) -> Report:
     trace = trace if trace is not None else RunTrace()
 
     # Step 1 — extract (halt on gate failure).
+    _emit(progress, "Extracting claims…")
     extracted = extract_claims(paragraph, llm, trace=trace, model=model)
     if extracted.failure is not None:
         return Report(
             paragraph=paragraph, claims=[], verdicts=[], trace=trace, failure=extracted.failure
         )
 
-    # Step 2 — retrieve evidence per claim.
-    items: list[ClaimEvidence] = []
-    for claim in extracted.claims:
-        evidence, _tool_failure = search_evidence(
-            claim, transport=transport, trace=trace, max_results=max_results
-        )
-        items.append(ClaimEvidence(claim=claim, evidence=evidence or []))
+    # Step 2 — retrieve evidence per claim (concurrently).
+    _emit(progress, f"Searching evidence for {len(extracted.claims)} claim(s)…")
+    items = _gather_evidence(
+        extracted.claims, transport=transport, trace=trace, max_results=max_results
+    )
 
     # Steps 3 + 4 — judge, then evaluate-and-revise until it passes or the cap is hit.
+    _emit(progress, f"Judging {len(items)} claim(s) against the evidence…")
     judged = judge_claims(items, llm, trace=trace, model=model)
     iteration = 1
     while True:
@@ -82,7 +115,7 @@ def run_chain(
             failure=judged.failure,
         )
         if judged.failure is not None:
-            return report  # a judge gate failure halts the loop
+            return report
 
         evaluation = evaluate_report(report)
         report.evaluation = evaluation
@@ -96,6 +129,7 @@ def run_chain(
             return report
 
         iteration += 1
+        _emit(progress, f"Revising the report (iteration {iteration})…")
         judged = judge_claims(
             items,
             llm,
